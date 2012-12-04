@@ -26,7 +26,7 @@ def find_close_function(im, n_angles, beta=100, n_iter=100):
 
 l = 128
 
-im_nb = 1
+im_nb = 2
 
 if im_nb == 1:
     thet = np.pi/16.
@@ -38,7 +38,8 @@ if im_nb == 1:
     han2 = han[:, None] * han
     shan = han2 * s
     res, energies = find_close_function(shan, 8, beta=2, n_iter=100)
-    plt.imsave('null_space_eigvec_planewave.png', res, cmap='gray')
+    np.save('null_space_eigvec_planewave.npy', res)
+    #plt.imsave('null_space_eigvec_planewave.png', res, cmap='gray')
 
 if im_nb == 2:
     thet1 = np.pi/16.
@@ -53,7 +54,8 @@ if im_nb == 2:
     han2 = han[:, None] * han
     shan = han2 * s
     res, energies = find_close_function(shan, 8, beta=2, n_iter=120)
-    plt.imsave('null_space_eigvec.png', res, cmap='gray')
+    np.save('null_space_eigvec.npy', res)
+    # plt.imsave('null_space_eigvec.png', res, cmap='gray')
 
 
 if im_nb == 3:
