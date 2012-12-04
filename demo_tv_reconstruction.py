@@ -31,18 +31,21 @@ x = generate_synthetic_data(l)
 
 
 # Projection operator and projections data, with noise
-H = build_projection_operator(l, 80)
+H = build_projection_operator(l, 40)
 y = H * x.ravel()[:, np.newaxis]
 y += 2*np.random.randn(*y.shape)
 
 # Reconstruction
 t1 = time()
-res, energies = fista_tv(y, 50, 300, H) 
+res, energies = fista_tv(y, 10, 300, H) 
 t2 = time()
 print "reconstruction done in %f s" %(t2 - t1)
 
 # Fraction of errors of segmented image wrt ground truth
 err = [np.abs(x - (resi > 0.5)).mean() for resi in res]
+
+error = x - res[-1]
+print 'Error norm: %.3e' % np.sqrt(np.sum(error **2))
 
 # Display results
 plt.figure()
