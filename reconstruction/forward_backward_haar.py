@@ -1,5 +1,4 @@
 import numpy as np
-from tv_denoising import tv_denoise_fista
 import pywt
 from projections import back_projection, projection
 from scipy import sparse
@@ -214,7 +213,7 @@ def ista_haar(y, beta, niter, A=None):
         # compute the energy
         data_fidelity_err = 1./2 * (err**2).sum()
         l1_norm = beta * l1_norm_haar(coefs)
-        energy = data_fidelity_err + l1_norm 
+        energy = data_fidelity_err + l1_norm
         print energy
         energies.append(energy)
     return results, energies
@@ -229,11 +228,15 @@ def l1_norm_haar(coefs):
 
 
 def soft_thresholding_haar(coefs, weight=1):
+    # This soft thresholding operator scales the weight down in low
+    # levels (low freq info), as there is less noise and the coefs are
+    # less sparse
     res = []
-    for coef_arrays in coefs:
+    for level, coef_arrays in enumerate(coefs):
         new_coefs = []
+        this_weight = weight * (level + 1) ** 2
         for coef_array in coef_arrays:
             new_coefs.append(np.sign(coef_array) * \
-                            np.maximum(0, np.abs(coef_array) - weight))
+                             np.maximum(0, np.abs(coef_array) - this_weight))
         res.append(new_coefs)
     return res
