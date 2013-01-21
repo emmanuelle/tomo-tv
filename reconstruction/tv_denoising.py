@@ -11,8 +11,9 @@ def div(grad):
         this_res[-1] -= this_grad[-2]
     return res
 
+
 def gradient(img):
-    """ 
+    """
     Compute gradient of an image
 
     Parameters
@@ -26,7 +27,7 @@ def gradient(img):
         Gradient of the image: the i-th component along the first
         axis is the gradient along the i-th axis of the original
         array img
-"""
+    """
     shape = [img.ndim, ] + list(img.shape)
     gradient = np.zeros(shape, dtype=img.dtype)
     # 'Clever' code to have a view of the gradient with dimension i stop
@@ -68,6 +69,7 @@ def dual_gap(im, new, gap, weight):
         tv_new = 2 * weight * np.sqrt(gx**2 + gy**2).sum()
     dual_gap = (gap**2).sum() + tv_new - im_norm + (new**2).sum()
     return 0.5 / im_norm * dual_gap
+
 
 def tv_denoise_fista(im, weight=50, eps=5.e-5, n_iter_max=200,
                                 check_gap_frequency=3):
