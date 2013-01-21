@@ -72,8 +72,7 @@ def dual_gap(im, new, gap, weight):
 
 
 def tv_denoise_fista(im, weight=50, eps=5.e-5, n_iter_max=200,
-                                check_gap_frequency=3):
-
+                     check_gap_frequency=3, val_min=None, val_max=None):
     """
     Perform total-variation denoising on 2-d and 3-d images
 
@@ -100,6 +99,12 @@ def tv_denoise_fista(im, weight=50, eps=5.e-5, n_iter_max=200,
 
     n_iter_max: int, optional
         maximal number of iterations used for the optimization.
+
+    val_min: None or float, optional
+        an optional lower bound constraint on the reconstructed image
+
+    val_max: None or float, optional
+        an optional upper bound constraint on the reconstructed image
 
     Returns
     -------
@@ -131,6 +136,7 @@ def tv_denoise_fista(im, weight=50, eps=5.e-5, n_iter_max=200,
     t = 1.
     i = 0
     while i < n_iter_max:
+        # error is the dual variable
         error = weight * div(grad_aux) - im
         grad_tmp = gradient(error)
         grad_tmp *= 1./ (8 * weight)
@@ -141,13 +147,26 @@ def tv_denoise_fista(im, weight=50, eps=5.e-5, n_iter_max=200,
         grad_aux = (1 + t_factor) * grad_tmp - t_factor * grad_im
         grad_im = grad_tmp
         t = t_new
-        if (i % check_gap_frequency) == 0:
+        if (val_min is not None or val_max is not None or
+                                (i % check_gap_frequency) == 0):
             gap = weight * div(grad_im)
+            # Compute the primal variable
             new = im - gap
-            dgap = dual_gap(im, new, gap, weight)
-            if dgap < eps:
-                break
+            if (val_min is not None or val_max is not None):
+                new = new.clip(val_min, val_max, out=new)
+                # Now we need to recompute the dual variable
+                grad_im = gradient(new)
+            if (i % check_gap_frequency) == 0:
+                # In the case of bound constraints, the dual gap as we
+                # computed it may not go to zero.
+                dgap = dual_gap(im, new, gap, weight)
+                if dgap < eps:
+                    break
         i += 1
+    # Compute the primal variable
+    new = im - gap
+    if (val_min is not None or val_max is not None):
+        new = new.clip(val_min, val_max, out=new)
     return new
 
 

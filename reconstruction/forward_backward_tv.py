@@ -11,6 +11,7 @@ def tv_norm(im):
     grad_x2 = np.diff(im, axis=1)
     return np.sqrt(grad_x1[:, :-1]**2 + grad_x2[:-1, :]**2).sum()
 
+
 def tv_norm_anisotropic(im):
     """Compute the anisotropic TV norm of an image"""
     grad_x1 = np.diff(im, axis=0)
@@ -19,7 +20,8 @@ def tv_norm_anisotropic(im):
 
 # ------------------ Proximal iterators ----------------------------
 
-def fista_tv(y, beta, niter, H, verbose=0, mask=None):
+def fista_tv(y, beta, niter, H, verbose=0, mask=None,
+             val_min=None, val_max=None):
     """
     TV regression using FISTA algorithm
     (Fast Iterative Shrinkage/Thresholding Algorithm)
@@ -41,6 +43,12 @@ def fista_tv(y, beta, niter, H, verbose=0, mask=None):
         tomography design matrix. Should be in csr format.
 
     mask : array of bools
+
+    val_min: None or float, optional
+        an optional lower bound constraint on the reconstructed image
+
+    val_max: None or float, optional
+        an optional upper bound constraint on the reconstructed image
 
     Returns
     -------
@@ -102,7 +110,8 @@ def fista_tv(y, beta, niter, H, verbose=0, mask=None):
         else:
             tmp2d = tmp.reshape((l, l))
         u_n = tv_denoise_fista(tmp2d,
-                weight=beta*gamma, eps=eps)
+                weight=beta*gamma, eps=eps, val_min=val_min,
+                val_max=val_max)
         t_new = (1 + np.sqrt(1 + 4 * t_old**2))/2.
         t_old = t_new
         x = u_n + (t_old - 1)/t_new * (u_n - u_old)
@@ -218,6 +227,7 @@ def ista_tv(y, beta, niter, H=None):
         energies.append(energy)
     return res, energies
 
+
 def gfb_tv(y, beta, niter, H=None, val_min=0, val_max=1, x0=None,
            stop_tol=1.e-4):
     """
@@ -331,6 +341,7 @@ def gfb_tv(y, beta, niter, H=None, val_min=0, val_max=1, x0=None,
         if i>2 and np.abs(energy - energies[-2]) < stop_tol*energies[1]:
             break
     return res, energies
+
 
 def gfb_tv_local(y, beta, niter, mask_pix, mask_reg, H=None,
                                 val_min=0, val_max=1, x0=None):
