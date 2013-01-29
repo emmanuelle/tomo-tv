@@ -72,7 +72,8 @@ def dual_gap(im, new, gap, weight):
 
 
 def tv_denoise_fista(im, weight=50, eps=5.e-5, n_iter_max=200,
-                     check_gap_frequency=3, val_min=None, val_max=None):
+                     check_gap_frequency=3, val_min=None, val_max=None,
+                     verbose=False):
     """
     Perform total-variation denoising on 2-d and 3-d images
 
@@ -106,6 +107,9 @@ def tv_denoise_fista(im, weight=50, eps=5.e-5, n_iter_max=200,
     val_max: None or float, optional
         an optional upper bound constraint on the reconstructed image
 
+    verbose: bool, optional
+        if True, plot the dual gap of the optimization
+
     Returns
     -------
     out: ndarray
@@ -135,11 +139,19 @@ def tv_denoise_fista(im, weight=50, eps=5.e-5, n_iter_max=200,
     grad_aux = np.zeros(shape)
     t = 1.
     i = 0
+    if im.ndim == 2:
+        # Upper bound on the Lipschitz constant
+        lipschitz_constant = 9
+    elif im.ndim == 3:
+        lipschitz_constant = 12
+    else:
+        raise ValueError('Cannot compute TV for images that are not '
+                         '2D or 3D')
     while i < n_iter_max:
         # error is the dual variable
         error = weight * div(grad_aux) - im
         grad_tmp = gradient(error)
-        grad_tmp *= 1./ (8 * weight)
+        grad_tmp *= 1./ (lipschitz_constant * weight)
         grad_aux += grad_tmp
         grad_tmp = _projector_on_dual(grad_aux)
         t_new = 1. / 2 * (1 + np.sqrt(1 + 4 * t**2))
@@ -160,6 +172,8 @@ def tv_denoise_fista(im, weight=50, eps=5.e-5, n_iter_max=200,
                 # In the case of bound constraints, the dual gap as we
                 # computed it may not go to zero.
                 dgap = dual_gap(im, new, gap, weight)
+                if verbose:
+                    print 'Iteration % 2i, dual gap: % 6.3e' % (i, dgap)
                 if dgap < eps:
                     break
         i += 1
@@ -170,16 +184,32 @@ def tv_denoise_fista(im, weight=50, eps=5.e-5, n_iter_max=200,
     return new
 
 
+def test_grad_div_adjoint(size=12, random_state=42):
+    # We need to check that <D x, y> = <x, DT y> for x and y random vectors
+    random_state = np.random.RandomState(random_state)
+
+    x = np.random.normal(size=(size, size, size))
+    y = np.random.normal(size=(3, size, size, size))
+
+    np.testing.assert_almost_equal(np.sum(gradient(x) * y),
+                                   -np.sum(x * div(y)))
+
+
+
 if __name__ == '__main__':
+    # First our test
+    test_grad_div_adjoint()
     from scipy.misc import lena
     import matplotlib.pyplot as plt
     from time import time
+
+    # Smoke test on lena
     l = lena().astype(np.float)
     # normalize image between 0 and 1
     l /= l.max()
     l += 0.1 * l.std() * np.random.randn(*l.shape)
     t0 = time()
-    res = tv_denoise_fista(l, weight=0.05, eps=5.e-5)
+    res = tv_denoise_fista(l, weight=2.5, eps=5.e-5, verbose=True)
     t1 = time()
     print t1 - t0
     plt.figure()
@@ -187,4 +217,15 @@ if __name__ == '__main__':
     plt.imshow(l, cmap='gray')
     plt.subplot(122)
     plt.imshow(res, cmap='gray')
+
+    # Smoke test on a 3D random image with hidden structure
+    img = np.random.normal(size=(12, 24, 24))
+    img[4:8, 8:16, 8:16] += 1.5
+    res = tv_denoise_fista(img, weight=1.5, eps=5.e-5, verbose=True)
+    plt.figure()
+    plt.subplot(121)
+    plt.imshow(img[6], cmap='gray')
+    plt.subplot(122)
+    plt.imshow(res[6], cmap='gray')
+
     plt.show()
