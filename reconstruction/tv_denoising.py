@@ -131,26 +131,42 @@ def tv_denoise_fista(im, weight=50, eps=5.e-5, n_iter_max=200,
     total variation denoising in "Fast gradient-based algorithms for
     constrained total variation image denoising and deblurring problems"
     (2009).
+
+    For details on implementing the bound constraints, read the Beck and
+    Teboulle paper.
     """
-    if not im.dtype.kind == 'f':
-        im = im.astype(np.float)
-    shape = [im.ndim, ] + list(im.shape)
+    input_img = im
+    if not input_img.dtype.kind == 'f':
+        input_img = input_img.astype(np.float)
+    shape = [input_img.ndim, ] + list(input_img.shape)
     grad_im = np.zeros(shape)
     grad_aux = np.zeros(shape)
     t = 1.
     i = 0
-    if im.ndim == 2:
+    if input_img.ndim == 2:
         # Upper bound on the Lipschitz constant
         lipschitz_constant = 9
-    elif im.ndim == 3:
+    elif input_img.ndim == 3:
         lipschitz_constant = 12
     else:
         raise ValueError('Cannot compute TV for images that are not '
                          '2D or 3D')
+    # negated_output is the negated primal variable in the optimization
+    # loop
+    negated_output = -input_img
+    # Clipping values for the inner loop
+    negated_val_min = np.inf
+    negated_val_max = -np.inf
+    if val_min is not None:
+        negated_val_min = -val_min
+    if val_max is not None:
+        negated_val_max = -val_max
+    if (val_min is not None or val_max is not None):
+        # With bound constraints, the stopping criterion is on the
+        # evolution of the output
+        negated_output_old = negated_output.copy()
     while i < n_iter_max:
-        # error is the dual variable
-        error = weight * div(grad_aux) - im
-        grad_tmp = gradient(error)
+        grad_tmp = gradient(negated_output)
         grad_tmp *= 1./ (lipschitz_constant * weight)
         grad_aux += grad_tmp
         grad_tmp = _projector_on_dual(grad_aux)
@@ -159,29 +175,37 @@ def tv_denoise_fista(im, weight=50, eps=5.e-5, n_iter_max=200,
         grad_aux = (1 + t_factor) * grad_tmp - t_factor * grad_im
         grad_im = grad_tmp
         t = t_new
-        if (val_min is not None or val_max is not None or
-                                (i % check_gap_frequency) == 0):
-            gap = weight * div(grad_im)
-            # Compute the primal variable
-            new = im - gap
-            if (val_min is not None or val_max is not None):
-                new = new.clip(val_min, val_max, out=new)
-                # Now we need to recompute the dual variable
-                grad_im = gradient(new)
-            if (i % check_gap_frequency) == 0:
-                # In the case of bound constraints, the dual gap as we
-                # computed it may not go to zero.
-                dgap = dual_gap(im, new, gap, weight)
+        gap = weight * div(grad_im)
+        # Compute the primal variable
+        negated_output = gap - input_img
+        if (val_min is not None or val_max is not None):
+            negated_output = negated_output.clip(negated_val_max,
+                                negated_val_min,
+                                out=negated_output)
+        if (i % check_gap_frequency) == 0:
+            if val_min is None and val_max is None:
+                # In the case of bound constraints, we don't have
+                # the dual gap
+                dgap = dual_gap(input_img, -negated_output, gap, weight)
                 if verbose:
                     print 'Iteration % 2i, dual gap: % 6.3e' % (i, dgap)
                 if dgap < eps:
                     break
+            else:
+                diff = np.max(np.abs(negated_output_old - negated_output))
+                diff /= np.max(np.abs(negated_output))
+                if verbose:
+                    print 'Iteration % 2i, relative difference: % 6.3e' % (i,
+                                diff)
+                if diff < eps:
+                    break
+                negated_output_old = negated_output
         i += 1
     # Compute the primal variable
-    new = im - gap
+    output = input_img - gap
     if (val_min is not None or val_max is not None):
-        new = new.clip(val_min, val_max, out=new)
-    return new
+        output = output.clip(val_min, val_max, out=output)
+    return output
 
 
 def test_grad_div_adjoint(size=12, random_state=42):
@@ -219,13 +243,23 @@ if __name__ == '__main__':
     plt.imshow(res, cmap='gray')
 
     # Smoke test on a 3D random image with hidden structure
+    np.random.seed(42)
     img = np.random.normal(size=(12, 24, 24))
     img[4:8, 8:16, 8:16] += 1.5
-    res = tv_denoise_fista(img, weight=1.5, eps=5.e-5, verbose=True)
-    plt.figure()
-    plt.subplot(121)
-    plt.imshow(img[6], cmap='gray')
-    plt.subplot(122)
-    plt.imshow(res[6], cmap='gray')
+    res = tv_denoise_fista(img, weight=.6, eps=5.e-5, verbose=True)
+    plt.figure(figsize=(9, 3))
+    plt.subplot(131)
+    plt.imshow(img[6], cmap='gist_earth')
+    plt.title('Original data')
+    plt.subplot(132)
+    plt.imshow(res[6], cmap='gist_earth', vmin=-.1, vmax=.3)
+    plt.title('TV')
+
+    # add constraints
+    res_cons = tv_denoise_fista(img, weight=.6, eps=5.e-5, verbose=True,
+                           val_min=0, val_max=1.5)
+    plt.subplot(133)
+    plt.imshow(res_cons[6], cmap='gist_earth', vmin=-.1, vmax=.3)
+    plt.title('TV + interval')
 
     plt.show()
