@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def div(grad):
     """ Compute divergence of image gradient """
     res = np.zeros(grad.shape[1:])
@@ -32,7 +33,7 @@ def gradient(img):
     gradient = np.zeros(shape, dtype=img.dtype)
     # 'Clever' code to have a view of the gradient with dimension i stop
     # at -1
-    slice_all = [0, slice(None, -1),]
+    slice_all = [0, slice(None, -1), ]
     for d in range(img.ndim):
         gradient[slice_all] = np.diff(img, axis=d)
         slice_all[0] = d + 1
@@ -45,7 +46,7 @@ def _projector_on_dual(grad):
     modifies in place the gradient to project it
     on the L2 unit ball
     """
-    norm = np.maximum(np.sqrt(np.sum(grad**2, 0)), 1.)
+    norm = np.maximum(np.sqrt(np.sum(grad ** 2, 0)), 1.)
     for grad_comp in grad:
         grad_comp /= norm
     return grad
@@ -57,17 +58,17 @@ def dual_gap(im, new, gap, weight):
     see "Total variation regularization for fMRI-based prediction of behavior",
     by Michel et al. (2011) for a derivation of the dual gap
     """
-    im_norm = (im**2).sum()
+    im_norm = (im ** 2).sum()
     gx, gy = np.zeros_like(new), np.zeros_like(new)
     gx[:-1] = np.diff(new, axis=0)
     gy[:, :-1] = np.diff(new, axis=1)
     if im.ndim == 3:
         gz = np.zeros_like(new)
         gz[..., :-1] = np.diff(new, axis=2)
-        tv_new = 2 * weight * np.sqrt(gx**2 + gy**2 + gz**2).sum()
+        tv_new = 2 * weight * np.sqrt(gx ** 2 + gy ** 2 + gz ** 2).sum()
     else:
-        tv_new = 2 * weight * np.sqrt(gx**2 + gy**2).sum()
-    dual_gap = (gap**2).sum() + tv_new - im_norm + (new**2).sum()
+        tv_new = 2 * weight * np.sqrt(gx ** 2 + gy ** 2).sum()
+    dual_gap = (gap ** 2).sum() + tv_new - im_norm + (new ** 2).sum()
     return 0.5 / im_norm * dual_gap
 
 
@@ -155,8 +156,8 @@ def tv_denoise_fista(im, weight=50, eps=5.e-5, n_iter_max=200,
     # loop
     negated_output = -input_img
     # Clipping values for the inner loop
-    negated_val_min = np.inf
-    negated_val_max = -np.inf
+    negated_val_min = np.nan
+    negated_val_max = np.nan
     if val_min is not None:
         negated_val_min = -val_min
     if val_max is not None:
@@ -167,10 +168,10 @@ def tv_denoise_fista(im, weight=50, eps=5.e-5, n_iter_max=200,
         negated_output_old = negated_output.copy()
     while i < n_iter_max:
         grad_tmp = gradient(negated_output)
-        grad_tmp *= 1./ (lipschitz_constant * weight)
+        grad_tmp *= 1. / (lipschitz_constant * weight)
         grad_aux += grad_tmp
         grad_tmp = _projector_on_dual(grad_aux)
-        t_new = 1. / 2 * (1 + np.sqrt(1 + 4 * t**2))
+        t_new = 1. / 2 * (1 + np.sqrt(1 + 4 * t ** 2))
         t_factor = (t - 1) / t_new
         grad_aux = (1 + t_factor) * grad_tmp - t_factor * grad_im
         grad_im = grad_tmp
@@ -204,7 +205,7 @@ def tv_denoise_fista(im, weight=50, eps=5.e-5, n_iter_max=200,
     # Compute the primal variable
     output = input_img - gap
     if (val_min is not None or val_max is not None):
-        output = output.clip(val_min, val_max, out=output)
+        output = output.clip(-negated_val_min, -negated_val_max, out=output)
     return output
 
 
@@ -217,7 +218,6 @@ def test_grad_div_adjoint(size=12, random_state=42):
 
     np.testing.assert_almost_equal(np.sum(gradient(x) * y),
                                    -np.sum(x * div(y)))
-
 
 
 if __name__ == '__main__':
