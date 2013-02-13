@@ -55,16 +55,19 @@ def gradient_id(img, l1_ratio=1.):
 
 def _projector_on_dual(grad):
     """
-    modifies in place the gradient + id to project it
+    modifies IN PLACE the gradient + id to project it
     on the l21 unit ball in the gradient direction and the l1 ball in the
     identity direction
     """
     # The l21 ball for the gradient direction
-    norm = np.maximum(np.sqrt(np.sum(grad[:-1]**2, 0)), 1.)
+    norm = np.sqrt(np.sum(grad[:-1]**2, 0))
+    norm.clip(1., out=norm)
     for grad_comp in grad[:-1]:
         grad_comp /= norm
     # The l1 ball for the identity direction
-    grad[-1] /= np.maximum(np.abs(grad[-1]), 1.)
+    norm = np.abs(grad[-1])
+    norm.clip(1., out=norm)
+    grad[-1] /= norm
     return grad
 
 
@@ -75,16 +78,15 @@ def total_variation(gradient):
             + np.sum(np.abs(gradient[-1])))
 
 
-def dual_gap(im, new, gap, weight, l1_ratio=1.):
+def dual_gap(input_img_norm, new, gap, weight, l1_ratio=1.):
     """
     dual gap of total variation denoising
     see "Total variation regularization for fMRI-based prediction of behavior",
     by Michel et al. (2011) for a derivation of the dual gap
     """
-    im_norm = (im**2).sum()
     tv_new = total_variation(gradient_id(new, l1_ratio=l1_ratio))
-    d_gap = (gap**2).sum() + 2*weight*tv_new - im_norm + (new**2).sum()
-    return 0.5 / im_norm * d_gap
+    d_gap = (gap**2).sum() + 2*weight*tv_new - input_img_norm + (new**2).sum()
+    return 0.5 / input_img_norm * d_gap
 
 
 def _objective_function(input_img, output_img, gradient, weight):
@@ -92,9 +94,11 @@ def _objective_function(input_img, output_img, gradient, weight):
             + weight * total_variation(gradient))
 
 
-def tv_l1_fista(im, l1_ratio=.05, weight=50, eps=5.e-5, n_iter_max=200,
-                     check_gap_frequency=3, val_min=None, val_max=None,
-                     verbose=False, fista=True):
+@profile
+def tv_l1_fista(im, l1_ratio=.05, weight=50, dgap_tol=5.e-5, x_tol=None,
+                     n_iter_max=200,
+                     check_gap_frequency=4, val_min=None, val_max=None,
+                     verbose=True, fista=True):
     """
     Perform total-variation denoising on 2-d and 3-d images
 
@@ -114,10 +118,15 @@ def tv_l1_fista(im, l1_ratio=.05, weight=50, eps=5.e-5, n_iter_max=200,
         denoising weight. The greater ``weight``, the more denoising (at
         the expense of fidelity to ``input``)
 
-    eps: float, optional
+    dgap_tol: float, optional
         precision required. The distance to the exact solution is computed
-        by the dual gap of the optimization problem and rescaled by the l2
-        norm of the image (for contrast invariance).
+        by the dual gap of the optimization problem and rescaled by the
+        squared l2 norm of the image (for contrast invariance).
+
+    x_tol: float or None, optional
+        The maximal relative difference between input and output. If
+        specified, this specifies a stopping criterion on x, rather than
+        the dual gap
 
     n_iter_max: int, optional
         maximal number of iterations used for the optimization.
@@ -158,6 +167,7 @@ def tv_l1_fista(im, l1_ratio=.05, weight=50, eps=5.e-5, n_iter_max=200,
     """
     weight = float(weight)
     input_img = im
+    input_img_norm = (im ** 2).sum()
     if not input_img.dtype.kind == 'f':
         input_img = input_img.astype(np.float)
     shape = [input_img.ndim + 1, ] + list(input_img.shape)
@@ -189,11 +199,15 @@ def tv_l1_fista(im, l1_ratio=.05, weight=50, eps=5.e-5, n_iter_max=200,
         # With bound constraints, the stopping criterion is on the
         # evolution of the output
         negated_output_old = negated_output.copy()
+    grad_tmp = None
     while i < n_iter_max:
         grad_tmp = gradient_id(negated_output, l1_ratio=l1_ratio)
         grad_tmp *= 1. / (lipschitz_constant * weight)
         grad_aux += grad_tmp
         grad_tmp = _projector_on_dual(grad_aux)
+        # Carefull, in the next few lines, grad_tmp and grad_aux are a
+        # view on the same array, as _projector_on_dual returns a view
+        # on the input array
         t_new = 1. / 2 * (1 + np.sqrt(1 + 4 * t**2))
         t_factor = (t - 1) / t_new
         if fista:
@@ -210,26 +224,29 @@ def tv_l1_fista(im, l1_ratio=.05, weight=50, eps=5.e-5, n_iter_max=200,
                                 negated_val_min,
                                 out=negated_output)
         if (i % check_gap_frequency) == 0:
-            if val_min is None and val_max is None:
-                # In the case of bound constraints, we don't have
-                # the dual gap
-                dgap = dual_gap(input_img, -negated_output, gap, weight,
-                                l1_ratio=l1_ratio)
+            if x_tol is None:
+                # Stopping criterion based on the dual_gap
+                if val_min is not None or val_max is not None:
+                    # We need to recompute the dual variable
+                    gap = negated_output + input_img
+                dgap = dual_gap(input_img_norm, -negated_output,
+                                gap, weight, l1_ratio=l1_ratio)
                 if verbose:
                     print 'Iteration % 2i, dual gap: % 6.3e' % (i, dgap)
-                if dgap < eps:
+                if dgap < dgap_tol:
                     break
             else:
+                # Stopping criterion based on x_tol
                 diff = np.max(np.abs(negated_output_old - negated_output))
                 diff /= np.max(np.abs(negated_output))
                 if verbose:
                     print ('Iteration % 2i, relative difference: % 6.3e,'
-                           'energy: % 6.3e, %s' % (i, diff,
+                           'energy: % 6.3e' % (i, diff,
                            _objective_function(input_img,
-                           -negated_output,
-                           gradient_id(negated_output, l1_ratio=l1_ratio),
-                           weight)))
-                if diff < eps:
+                                -negated_output,
+                                gradient_id(negated_output, l1_ratio=l1_ratio),
+                                weight)))
+                if diff < x_tol:
                     break
                 negated_output_old = negated_output
         i += 1
@@ -264,8 +281,8 @@ if __name__ == '__main__':
     l[-60:-30, 120:220] = 2.
     l_noisy = l + 3 * l.std() * np.random.randn(*l.shape)
     t0 = time()
-    res = tv_l1_fista(l, weight=2.5, l1_ratio=.02, eps=1.e-5, verbose=True,
-                      fista=True, n_iter_max=5000)
+    res = tv_l1_fista(l, weight=2.5, l1_ratio=.02, dgap_tol=1.e-5,
+                      verbose=True, fista=True, n_iter_max=5000)
     t1 = time()
     print t1 - t0
     plt.figure()
